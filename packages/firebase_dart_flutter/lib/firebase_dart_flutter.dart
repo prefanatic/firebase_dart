@@ -1,14 +1,15 @@
 import 'dart:async';
+
 import 'package:firebase_dart/implementation/pure_dart.dart';
 import 'package:firebase_dart_flutter/src/auth_handlers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:hive/hive.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:platform_info/platform_info.dart' as platform_info;
-import 'package:package_info/package_info.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:hive/hive.dart';
 
 class FirebaseDartFlutter {
   static const _channel = MethodChannel('firebase_dart_flutter');
