@@ -27,7 +27,6 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
-import io.flutter.plugin.common.PluginRegistry.Registrar;
 
 import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.android.gms.common.ConnectionResult;
@@ -56,13 +55,15 @@ public class FirebaseDartFlutterPlugin implements FlutterPlugin, MethodCallHandl
   static final String ACTION_AUTH_RECEIVED = "be.appsup.firebase_dart_flutter.ACTION_AUTH_RECEIVED";
   static final String ACTION_RECAPTCHA_RECEIVED = "be.appsup.firebase_dart_flutter.ACTION_RECAPTCHA_RECEIVED";
 
+  public static void registerWith(FlutterPluginBinding binding) {
+    binding.getFlutterEngine().getPlugins().add(new FirebaseDartFlutterPlugin());
+  }
+
   @Override
   public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
     channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "firebase_dart_flutter");
     channel.setMethodCallHandler(this);
     binding = flutterPluginBinding;
-
-
   }
 
   @Override
@@ -139,7 +140,7 @@ public class FirebaseDartFlutterPlugin implements FlutterPlugin, MethodCallHandl
                     }
                 });
             break;
-        case "getAppSignatureHash": 
+        case "getAppSignatureHash":
             try {
                 result.success(getAppSignatureHash());
             } catch (PackageManager.NameNotFoundException e) {
@@ -147,7 +148,7 @@ public class FirebaseDartFlutterPlugin implements FlutterPlugin, MethodCallHandl
             } catch (NoSuchAlgorithmException e) {
                 result.error("No such algorithm", e.getMessage(), null);
             }
-            break;  
+            break;
         case "retrieveSms":
             retrieveSms(result);
             break;
@@ -216,7 +217,7 @@ private void retrieveSms(@NonNull final Result result) {
 
     return base64Hash;
 
-  }  
+  }
 
   static private Map<String,Object> bundleToMap(Bundle bundle) {
       Map<String,Object> map = new HashMap<>();
