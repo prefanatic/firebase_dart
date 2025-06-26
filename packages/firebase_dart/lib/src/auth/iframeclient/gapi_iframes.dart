@@ -3,65 +3,78 @@
 @JS('gapi.iframes')
 library gapi.iframes;
 
-import 'dart:html';
+import 'dart:js_interop';
 
-import 'package:js/js.dart';
+import 'package:web/web.dart';
 
 @JS()
+@staticInterop
 external Context getContext();
 
 @JS()
-class Iframe {
+@staticInterop
+class Iframe {}
+
+extension IframeExtension on Iframe {
   external IThenable ping();
-
   external void restyle(IframeRestyleOptions parameters);
-
   external void send(
-      String type, dynamic data, Function onDone, IframesFilter filter);
-
-  external void register(String eventName, IframeEventHandler callback,
-      [IframesFilter filter]);
-  external void unregister(String eventName, IframeEventHandler callback);
+      String type, JSAny data, JSFunction onDone, IframesFilter filter);
+  external void register(String eventName, JSFunction callback,
+      [IframesFilter? filter]);
+  external void unregister(String eventName, JSFunction callback);
 }
 
 @JS()
 @anonymous
-abstract class Context {
+@staticInterop
+abstract class Context {}
+
+extension ContextExtension on Context {
   external void openChild(IframeOptions options);
-
-  external void open(IframeOptions options, [Function(Iframe) onOpen]);
+  external void open(IframeOptions options, [JSFunction? onOpen]);
 }
 
 @JS()
 @anonymous
-abstract class IframeAttributes {
-  external CssStyleDeclaration? style;
+@staticInterop
+abstract class IframeAttributes {}
 
-  external factory IframeAttributes({CssStyleDeclaration? style});
+extension IframeAttributesExtension on IframeAttributes {
+  external CSSStyleDeclaration? get style;
+  external set style(CSSStyleDeclaration? value);
 }
 
 @JS()
 @anonymous
-abstract class IframeRestyleOptions {
-  external bool? setHideOnLeave;
+@staticInterop
+abstract class IframeRestyleOptions {}
 
-  external factory IframeRestyleOptions({bool? setHideOnLeave});
+extension IframeRestyleOptionsExtension on IframeRestyleOptions {
+  external bool? get setHideOnLeave;
+  external set setHideOnLeave(bool? value);
 }
 
 @JS()
 @anonymous
-abstract class IframeEvent {
-  external String type;
+@staticInterop
+abstract class IframeEvent {}
 
-  external IframeAuthEvent? authEvent;
+extension IframeEventExtension on IframeEvent {
+  external String get type;
+  external set type(String value);
+  external IframeAuthEvent? get authEvent;
+  external set authEvent(IframeAuthEvent? value);
 }
 
 @JS()
 @anonymous
-abstract class IframeEventHandlerResponse {
-  external String status;
+@staticInterop
+abstract class IframeEventHandlerResponse {}
 
-  external factory IframeEventHandlerResponse({String status});
+extension IframeEventHandlerResponseExtension on IframeEventHandlerResponse {
+  external String get status;
+  external set status(String value);
 }
 
 typedef IframeEventHandler = IframeEventHandlerResponse Function(
@@ -69,57 +82,103 @@ typedef IframeEventHandler = IframeEventHandlerResponse Function(
 
 @JS()
 @anonymous
-abstract class IframeAuthEvent {
-  external String? eventId;
+@staticInterop
+abstract class IframeAuthEvent {}
 
-  external String? postBody;
-
-  external String? sessionId;
-
-  external String? providerId;
-
-  external String? tenantId;
-
-  external String type;
-
-  external String? urlResponse;
-
-  external IframeError? error;
+extension IframeAuthEventExtension on IframeAuthEvent {
+  external String? get eventId;
+  external set eventId(String? value);
+  external String? get postBody;
+  external set postBody(String? value);
+  external String? get sessionId;
+  external set sessionId(String? value);
+  external String? get providerId;
+  external set providerId(String? value);
+  external String? get tenantId;
+  external set tenantId(String? value);
+  external String get type;
+  external set type(String value);
+  external String? get urlResponse;
+  external set urlResponse(String? value);
+  external IframeError? get error;
+  external set error(IframeError? value);
 }
 
 @JS()
 @anonymous
-abstract class IframeError {
-  external String code;
+@staticInterop
+abstract class IframeError {}
 
-  external String message;
+extension IframeErrorExtension on IframeError {
+  external String get code;
+  external set code(String value);
+  external String get message;
+  external set message(String value);
 }
 
 @JS()
 @anonymous
-abstract class IframeOptions {
+@staticInterop
+abstract class IframeOptions {}
+
+extension IframeOptionsExtension on IframeOptions {
   external String get url;
-  external HtmlElement? get where;
+  external set url(String value);
+  external HTMLElement? get where;
+  external set where(HTMLElement? value);
   external IframeAttributes? get attributes;
-  external IframesFilter? messageHandlersFilter;
-  external bool? dontclear;
-
-  external factory IframeOptions(
-      {String url,
-      HtmlElement? where,
-      IframeAttributes? attributes,
-      IframesFilter? messageHandlersFilter,
-      bool? dontclear});
+  external set attributes(IframeAttributes? value);
+  external IframesFilter? get messageHandlersFilter;
+  external set messageHandlersFilter(IframesFilter? value);
+  external bool? get dontclear;
+  external set dontclear(bool? value);
 }
 
 @JS()
 @anonymous
-abstract class IThenable {
-  external void then(Function callback, Function onError);
+@staticInterop
+abstract class IThenable {}
+
+extension IThenableExtension on IThenable {
+  external void then(JSFunction callback, JSFunction onError);
 }
 
 @JS()
+@staticInterop
 external IframesFilter get CROSS_ORIGIN_IFRAMES_FILTER;
 
 @JS()
+@staticInterop
 abstract class IframesFilter {}
+
+@JS()
+@anonymous
+@staticInterop
+external IframeAttributes createIframeAttributes(
+  CSSStyleDeclaration? style,
+);
+
+@JS()
+@anonymous
+@staticInterop
+external IframeRestyleOptions createIframeRestyleOptions(
+  bool? setHideOnLeave,
+);
+
+@JS()
+@anonymous
+@staticInterop
+external IframeEventHandlerResponse createIframeEventHandlerResponse(
+  String? status,
+);
+
+@JS()
+@anonymous
+@staticInterop
+external IframeOptions createIframeOptions(
+  String? url,
+  HTMLElement? where,
+  IframeAttributes? attributes,
+  IframesFilter? messageHandlersFilter,
+  bool? dontclear,
+);

@@ -1,11 +1,18 @@
-import 'dart:js';
+import 'dart:js_interop';
 
-dynamic getObjectRef(String ref) {
-  dynamic m = context;
-  for (var k in ref.split('.')) {
-    m = m?[k];
+@JS('Reflect.get')
+external JSAny? getProperty(JSObject object, String property);
+
+@JS('globalThis')
+external JSObject get globalThis;
+
+JSAny? getObjectRef(String ref) {
+  JSAny? current = globalThis;
+  for (final segment in ref.split('.')) {
+    if (current is! JSObject) return null;
+    current = getProperty(current, segment);
   }
-  return m;
+  return current;
 }
 
 class Delay {

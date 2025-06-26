@@ -1,10 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:firebase_dart/src/auth/auth.dart';
 import 'package:firebase_dart/src/auth/impl/auth.dart';
 import 'package:firebase_dart/src/auth/user.dart';
-import 'package:firebase_dart/src/core/impl/persistence.dart';
-import 'package:hive/hive.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'impl/user.dart';
 
@@ -20,12 +20,12 @@ class UserManager {
   String get appId => auth.app.options.appId;
 
   /// The underlying storage manager.
-  final FutureOr<Box> storage;
+  late SharedPreferences _prefs;
 
   final StreamController<FirebaseUserImpl?> _controller =
       StreamController.broadcast();
 
-  late StreamSubscription _subscription;
+  Timer? _pollTimer;
 
   Future<void>? _onReady;
 
@@ -33,54 +33,90 @@ class UserManager {
 
   Stream<FirebaseUserImpl?> get onCurrentUserChanged => _controller.stream;
 
-  UserManager(this.auth, [FutureOr<Box>? storage])
-      : storage = storage ?? PersistenceStorage.openBox('firebase_auth') {
+  UserManager(this.auth) {
     _onReady = _init();
   }
 
   Future<void> _init() async {
-    var storage = await this.storage;
+    _prefs = await SharedPreferences.getInstance();
 
-    _subscription = storage
-        .watch(key: _key)
-        .map((v) => v.value)
-        .distinct()
-        .cast<Map?>()
-        .map((v) =>
-            v == null ? null : FirebaseUserImpl.fromJson(v.cast(), auth: auth))
-        .listen(_controller.add);
+    // Since SharedPreferences doesn't have native watching capabilities,
+    // we'll use polling to detect changes.
+    _startPolling();
   }
 
-  String get _key => 'firebase:FirebaseUser:$appId';
+  void _startPolling() {
+    FirebaseUserImpl? lastUser;
+
+    _pollTimer = Timer.periodic(Duration(milliseconds: 500), (timer) async {
+      try {
+        final currentUser = await _getCurrentUserFromStorage();
+
+        // Only emit if user actually changed
+        if (_usersAreDifferent(lastUser, currentUser)) {
+          lastUser = currentUser;
+          _controller.add(currentUser);
+        }
+      } catch (e) {
+        // Handle errors silently or log them
+      }
+    });
+  }
+
+  bool _usersAreDifferent(FirebaseUserImpl? user1, FirebaseUserImpl? user2) {
+    if (user1 == null && user2 == null) return false;
+    if (user1 == null || user2 == null) return true;
+    return user1.uid != user2.uid;
+  }
+
+  String get _key => 'firebase_auth_user_$appId';
 
   /// Stores the current Auth user for the provided application ID.
   Future<void> setCurrentUser(User? currentUser) async {
     await onReady;
-    // Wait for any pending persistence change to be resolved.
-    await (await storage).put(_key, currentUser?.toJson());
+
+    if (currentUser == null) {
+      await _prefs.remove(_key);
+    } else {
+      final jsonString = jsonEncode(currentUser.toJson());
+      await _prefs.setString(_key, jsonString);
+    }
   }
 
   /// Removes the stored current user for provided app ID.
   Future<void> removeCurrentUser() async {
     await onReady;
-    await (await storage).delete(_key);
+    await _prefs.remove(_key);
   }
 
   Future<FirebaseUserImpl?> getCurrentUser([String? authDomain]) async {
     await onReady;
-    var response = await (await storage).get(_key);
+    return _getCurrentUserFromStorage(authDomain);
+  }
 
-    return response == null
-        ? null
-        : FirebaseUserImpl.fromJson({
-            ...response,
-            if (authDomain != null) 'authDomain': authDomain,
-          }, auth: auth);
+  Future<FirebaseUserImpl?> _getCurrentUserFromStorage(
+      [String? authDomain]) async {
+    final jsonString = _prefs.getString(_key);
+
+    if (jsonString == null) return null;
+
+    try {
+      final Map<String, dynamic> userData = jsonDecode(jsonString);
+
+      return FirebaseUserImpl.fromJson({
+        ...userData,
+        if (authDomain != null) 'authDomain': authDomain,
+      }, auth: auth);
+    } catch (e) {
+      // If JSON is corrupted, remove it and return null
+      await _prefs.remove(_key);
+      return null;
+    }
   }
 
   Future<void> close() async {
     await onReady;
-    await _subscription.cancel();
+    _pollTimer?.cancel();
     await _controller.close();
   }
 }

@@ -1,14 +1,11 @@
 import 'package:firebase_dart/implementation/pure_dart.dart';
 import 'package:firebase_dart/src/auth/app_verifier.dart';
 import 'package:firebase_dart/src/auth/utils.dart';
-import 'package:firebase_dart/src/core/impl/persistence.dart';
 import 'package:firebase_dart/src/implementation.dart';
 import 'package:firebase_dart/src/implementation/dart.dart';
 import 'package:firebase_dart/src/implementation/isolate.dart';
 import 'package:firebase_dart/src/implementation/testing.dart';
-import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
-
 import 'package:jose/jose.dart';
 
 void setupPureDartImplementation(
@@ -33,12 +30,6 @@ void setupPureDartImplementation(
         smsRetriever: smsRetriever,
         httpClient: httpClient));
   } else {
-    if (storagePath != null) {
-      Hive.init(storagePath);
-    } else {
-      PersistenceStorage.setupMemoryStorage();
-    }
-
     initPlatform(platform);
     if (httpClient is TestClient) {
       httpClient.init();

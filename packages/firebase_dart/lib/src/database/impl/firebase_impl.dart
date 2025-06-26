@@ -3,13 +3,12 @@ import 'dart:async';
 import 'package:firebase_dart/auth.dart';
 import 'package:firebase_dart/core.dart';
 import 'package:firebase_dart/src/core/impl/app.dart';
-import 'package:firebase_dart/src/core/impl/persistence.dart';
 import 'package:firebase_dart/src/database/impl/persistence/default_manager.dart';
-import 'package:firebase_dart/src/database/impl/persistence/hive_engine.dart';
 import 'package:firebase_dart/src/database/impl/persistence/manager.dart';
 import 'package:firebase_dart/src/database/impl/persistence/policy.dart';
+import 'package:firebase_dart/src/database/impl/persistence/shared_prefs_engine.dart';
 import 'package:firebase_dart/src/implementation.dart';
-import 'package:hive/hive.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../database.dart';
 import 'repo.dart';
@@ -43,7 +42,7 @@ mixin BaseFirebaseDatabase implements FirebaseDatabase {
   bool _persistenceManagerInitialized = false;
 
   String get _persistenceStorageName =>
-      'firebase-db-persistence-storage-${Uri.parse(databaseURL).host}';
+      'firebase_db_persistence_storage_${Uri.parse(databaseURL).host}';
 
   static final Map<String, MapEntry<PersistenceManager, int>>
       _persistenceManagers = {};
@@ -54,11 +53,12 @@ mixin BaseFirebaseDatabase implements FirebaseDatabase {
     if (!_persistenceEnabled) return NoopPersistenceManager();
 
     var m = _persistenceManagers[_persistenceStorageName] ??= MapEntry(
-        DefaultPersistenceManager(
-            HivePersistenceStorageEngine(
-                KeyValueDatabase(Hive.box(_persistenceStorageName))),
-            LRUCachePolicy(_persistenceCacheSize)),
-        0);
+      DefaultPersistenceManager(
+        SharedPrefsPersistenceStorageEngine(_persistenceStorageName),
+        LRUCachePolicy(_persistenceCacheSize),
+      ),
+      0,
+    );
 
     _persistenceManagers[_persistenceStorageName] =
         MapEntry(m.key, m.value + 1);
@@ -74,15 +74,15 @@ mixin BaseFirebaseDatabase implements FirebaseDatabase {
   Future<bool> setPersistenceEnabled(bool enabled) async {
     if (_persistenceManagerInitialized) return false;
     if (_persistenceEnabled == enabled) return true;
+
     if (enabled) {
-      await PersistenceStorage.openBox(_persistenceStorageName);
+      // Initialize SharedPreferences instance to ensure it's available
+      await SharedPreferences.getInstance();
       if (_persistenceManagerInitialized) {
-        await Hive.box(_persistenceStorageName).close();
         return false;
       }
-    } else if (Hive.isBoxOpen(_persistenceStorageName)) {
-      await Hive.box(_persistenceStorageName).close();
     }
+
     _persistenceEnabled = enabled;
     return true;
   }
@@ -117,8 +117,16 @@ mixin BaseFirebaseDatabase implements FirebaseDatabase {
         }
       }
       await persistenceManager.close();
-      if (Hive.isBoxOpen(_persistenceStorageName)) {
-        await Hive.box(_persistenceStorageName).close();
+
+      // Clear all keys with this storage name prefix from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs
+          .getKeys()
+          .where((key) => key.startsWith(_persistenceStorageName))
+          .toList();
+
+      for (final key in keys) {
+        await prefs.remove(key);
       }
     }
   }
@@ -270,7 +278,7 @@ class QueryImpl extends Query {
       throw ArgumentError(
           'When ordering by key, the argument passed to startAt(), endAt(),or equalTo() must be a non null string.');
     }
-    if (key.contains(RegExp(r'\.\#\$\/\[\]'))) {
+    if (key.contains(RegExp(r'\.#\$/\[\]'))) {
       throw ArgumentError(
           'Second argument was an invalid key = "[MIN_VALUE]".  Firebase keys must be non-empty strings and can\'t contain ".", "#", "\$", "/", "[", or "]").');
     }

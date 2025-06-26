@@ -3,13 +3,13 @@ import 'dart:convert';
 import 'package:firebase_dart/src/database/impl/operations/tree.dart';
 import 'package:firebase_dart/src/database/impl/persistence/prune_forest.dart';
 import 'package:firebase_dart/src/database/impl/persistence/tracked_query.dart';
-import 'package:hive/hive.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:synchronized/extension.dart';
 
 import '../data_observer.dart';
 import '../tree.dart';
-import '../utils.dart';
 import '../treestructureddata.dart';
+import '../utils.dart';
 import 'engine.dart';
 
 class PersistenceStorageTransaction {
@@ -65,137 +65,227 @@ abstract class PersistenceStorageDatabase {
   bool get isOpen;
 }
 
-class PersistenceStorageDatabaseImpl extends PersistenceStorageDatabase {
-  static const _serverCachePrefix = 'C';
-  static const _trackedQueryPrefix = 'Q';
-  static const _userWritesPrefix = 'W';
+class SharedPrefsPersistenceStorageDatabase extends PersistenceStorageDatabase {
+  final String _storageName;
+  late final String _serverCachePrefix;
+  late final String _trackedQueryPrefix;
+  late final String _userWritesPrefix;
+  late final String _serverCacheKeysKey;
 
-  final KeyValueDatabase database;
+  SharedPreferences? _prefs;
+  late IncompleteData? _lastWrittenServerCache;
 
-  late IncompleteData _lastWrittenServerCache = _loadServerCache();
+  SharedPrefsPersistenceStorageDatabase(this._storageName) {
+    _serverCachePrefix = '${_storageName}_cache_';
+    _trackedQueryPrefix = '${_storageName}_query_';
+    _userWritesPrefix = '${_storageName}_write_';
+    _serverCacheKeysKey = '${_storageName}_cache_keys';
+  }
 
-  PersistenceStorageDatabaseImpl(this.database);
+  Future<void> _ensureInitialized() async {
+    _prefs ??= await SharedPreferences.getInstance();
+  }
 
   @override
   IncompleteData loadServerCache() {
     assert(isOpen);
-    return _lastWrittenServerCache;
+    _lastWrittenServerCache ??= _loadServerCache();
+    return _lastWrittenServerCache!;
   }
 
   IncompleteData _loadServerCache() {
-    var keys = database.keysBetween(
-      startKey: '$_serverCachePrefix:',
-      endKey: '$_serverCachePrefix;',
-    );
+    final cacheKeysJson = _prefs!.getString(_serverCacheKeysKey);
+    if (cacheKeysJson == null) {
+      return IncompleteData.empty();
+    }
 
-    return IncompleteData.fromLeafs({
-      for (var k in keys)
-        Name.parsePath(k.substring('$_serverCachePrefix:'.length)):
-            TreeStructuredData.fromExportJson(database.box.get(k))
-    });
+    final cacheKeys = List<String>.from(json.decode(cacheKeysJson));
+    final Map<Path<Name>, TreeStructuredData> leafs = {};
+
+    for (final key in cacheKeys) {
+      final dataJson = _prefs!.getString('$_serverCachePrefix$key');
+      if (dataJson != null) {
+        final path = Name.parsePath(key);
+        final data = TreeStructuredData.fromExportJson(json.decode(dataJson));
+        leafs[path] = data;
+      }
+    }
+
+    return IncompleteData.fromLeafs(leafs);
   }
 
   @override
   List<TrackedQuery> loadTrackedQueries() {
     assert(isOpen);
-    return [
-      ...database
-          .valuesBetween(
-              startKey: '$_trackedQueryPrefix:',
-              endKey: '$_trackedQueryPrefix;')
-          .map((v) => TrackedQuery.fromJson(v))
-    ]..sort((a, b) => Comparable.compare(a.id, b.id));
+    if (_prefs == null) return [];
+
+    final keys = _prefs!
+        .getKeys()
+        .where((key) => key.startsWith(_trackedQueryPrefix))
+        .toList();
+
+    final queries = <TrackedQuery>[];
+    for (final key in keys) {
+      final jsonString = _prefs!.getString(key);
+      if (jsonString != null) {
+        try {
+          final queryData = json.decode(jsonString);
+          queries.add(TrackedQuery.fromJson(queryData));
+        } catch (e) {
+          // Skip malformed queries
+          continue;
+        }
+      }
+    }
+
+    queries.sort((a, b) => Comparable.compare(a.id, b.id));
+    return queries;
   }
 
   @override
   Map<int, TreeOperation> loadUserOperations() {
     assert(isOpen);
-    return {
-      for (var k in database.keysBetween(
-          startKey: '$_userWritesPrefix:', endKey: '$_userWritesPrefix;'))
-        int.parse(k.substring('$_userWritesPrefix:'.length)):
-            TreeOperationX.fromJson(database.box.get(k))
-    };
+    if (_prefs == null) return {};
+
+    final keys = _prefs!
+        .getKeys()
+        .where((key) => key.startsWith(_userWritesPrefix))
+        .toList();
+
+    final operations = <int, TreeOperation>{};
+    for (final key in keys) {
+      final jsonString = _prefs!.getString(key);
+      if (jsonString != null) {
+        try {
+          final writeId = int.parse(key.substring(_userWritesPrefix.length));
+          final operationData = json.decode(jsonString);
+          operations[writeId] = TreeOperationX.fromJson(operationData);
+        } catch (e) {
+          // Skip malformed operations
+          continue;
+        }
+      }
+    }
+
+    return operations;
   }
 
   @override
   Future<void> applyTransaction(
       PersistenceStorageTransaction transaction) async {
+    await _ensureInitialized();
     assert(isOpen);
-    database.beginTransaction();
 
-    for (var e in transaction._trackedQueries.entries) {
-      var trackedQueryId = e.key;
-      var trackedQuery = e.value;
+    // Handle tracked queries
+    for (final entry in transaction._trackedQueries.entries) {
+      final trackedQueryId = entry.key;
+      final trackedQuery = entry.value;
+      final key = '$_trackedQueryPrefix$trackedQueryId';
+
       if (trackedQuery == null) {
-        database.delete('$_trackedQueryPrefix:$trackedQueryId');
+        await _prefs!.remove(key);
       } else {
-        database.put(
-            '$_trackedQueryPrefix:${trackedQuery.id}', trackedQuery.toJson());
+        final jsonString = json.encode(trackedQuery.toJson());
+        await _prefs!.setString(key, jsonString);
       }
     }
 
-    for (var e in transaction._userOperations.entries) {
-      var writeId = e.key;
-      var operation = e.value;
+    // Handle user operations
+    for (final entry in transaction._userOperations.entries) {
+      final writeId = entry.key;
+      final operation = entry.value;
+      final key = '$_userWritesPrefix$writeId';
+
       if (operation == null) {
-        database.delete('$_userWritesPrefix:$writeId');
+        await _prefs!.remove(key);
       } else {
-        database.put('$_userWritesPrefix:$writeId', operation.toJson());
+        final jsonString = json.encode(operation.toJson());
+        await _prefs!.setString(key, jsonString);
       }
     }
 
-    var serverCache = transaction._serverCache;
-
+    // Handle server cache
+    final serverCache = transaction._serverCache;
     if (serverCache != null) {
-      void write(Path<Name> path, TreeNode<Name, TreeStructuredData?> value,
-          TreeNode<Name, TreeStructuredData?> lastWritten) {
-        if (value.value != null && lastWritten.value == value.value) return;
-
-        if (value.value != null || lastWritten.value != null) {
-          var p = path.join('/');
-          database.deleteAll(database.keysBetween(
-            startKey: '$_serverCachePrefix:$p/',
-            endKey: '$_serverCachePrefix:${p}0',
-          ));
-        }
-
-        if (value.value != null) {
-          var p = path.join('/');
-          var v = value.value!;
-          // we will read back the data as if it were ordered/filtered with default, so we should also write it like that
-          assert(v.filter == const QueryFilter());
-
-          database.put('$_serverCachePrefix:$p/', v.toJson(true));
-        } else {
-          var allChildren = [
-            ...lastWritten.children.keys,
-            ...value.children.keys
-          ];
-
-          for (var k in allChildren) {
-            write(path.child(k), value.children[k] ?? const LeafTreeNode(null),
-                lastWritten.children[k] ?? const LeafTreeNode(null));
-          }
-        }
-      }
-
-      write(Path(), serverCache.writeTree, _lastWrittenServerCache.writeTree);
-
+      await _writeServerCache(serverCache);
       _lastWrittenServerCache = serverCache;
     }
+  }
 
-    await database.endTransaction();
+  Future<void> _writeServerCache(IncompleteData serverCache) async {
+    // Get current cache keys
+    final currentCacheKeysJson = _prefs!.getString(_serverCacheKeysKey);
+    final currentCacheKeys = currentCacheKeysJson != null
+        ? Set<String>.from(json.decode(currentCacheKeysJson))
+        : <String>{};
+
+    final newCacheKeys = <String>{};
+
+    void write(Path<Name> path, TreeNode<Name, TreeStructuredData?> value,
+        TreeNode<Name, TreeStructuredData?> lastWritten) {
+      if (value.value != null && lastWritten.value == value.value) return;
+
+      final pathString = path.join('/');
+
+      if (value.value != null || lastWritten.value != null) {
+        // Remove child cache entries for this path
+        final childKeysToRemove = currentCacheKeys
+            .where((key) => key.startsWith('$pathString/'))
+            .toList();
+
+        for (final childKey in childKeysToRemove) {
+          _prefs!.remove('$_serverCachePrefix$childKey');
+          currentCacheKeys.remove(childKey);
+        }
+      }
+
+      if (value.value != null) {
+        final data = value.value!;
+        // Ensure default query filter
+        assert(data.filter == const QueryFilter());
+
+        final jsonString = json.encode(data.toJson(true));
+        _prefs!.setString('$_serverCachePrefix$pathString/', jsonString);
+        newCacheKeys.add('$pathString/');
+      } else {
+        // Handle children recursively
+        final allChildren = [
+          ...lastWritten.children.keys,
+          ...value.children.keys
+        ];
+
+        for (final childKey in allChildren) {
+          write(
+            path.child(childKey),
+            value.children[childKey] ?? const LeafTreeNode(null),
+            lastWritten.children[childKey] ?? const LeafTreeNode(null),
+          );
+        }
+      }
+    }
+
+    write(Path(), serverCache.writeTree, _lastWrittenServerCache!.writeTree);
+
+    // Update cache keys list
+    currentCacheKeys.addAll(newCacheKeys);
+    final updatedCacheKeysJson = json.encode(currentCacheKeys.toList());
+    await _prefs!.setString(_serverCacheKeysKey, updatedCacheKeysJson);
   }
 
   @override
-  Future<void> close() {
-    assert(isOpen);
-    return database.close();
+  Future<void> close() async {
+    // SharedPreferences doesn't need explicit closing
+    _prefs = null;
   }
 
   @override
-  bool get isOpen => database.box.isOpen;
+  bool get isOpen => true; // SharedPreferences is always available
+
+  /// Ensures SharedPreferences is initialized - called automatically when needed
+  Future<void> ensureInitialized() async {
+    await _ensureInitialized();
+    _lastWrittenServerCache ??= _loadServerCache();
+  }
 }
 
 class DebouncedPersistenceStorageDatabase
@@ -273,14 +363,15 @@ class DebouncedPersistenceStorageDatabase
   bool get isOpen => delegateTo.isOpen;
 }
 
-class HivePersistenceStorageEngine extends PersistenceStorageEngine {
+class SharedPrefsPersistenceStorageEngine extends PersistenceStorageEngine {
   final PersistenceStorageDatabase database;
 
   PersistenceStorageTransaction? _transaction;
 
-  HivePersistenceStorageEngine(KeyValueDatabase database)
+  SharedPrefsPersistenceStorageEngine(String persistenceStorageName)
       : database = DebouncedPersistenceStorageDatabase(
-            PersistenceStorageDatabaseImpl(database));
+          SharedPrefsPersistenceStorageDatabase(persistenceStorageName),
+        );
 
   @override
   void beginTransaction() {
@@ -401,94 +492,6 @@ class HivePersistenceStorageEngine extends PersistenceStorageEngine {
   @override
   Future<void> close() async {
     await database.close();
-  }
-}
-
-class KeyValueDatabase {
-  final Box box;
-
-  Map<String, dynamic>? _transaction;
-
-  KeyValueDatabase(this.box);
-
-  bool get isInsideTransaction => _transaction != null;
-
-  Iterable<dynamic> valuesBetween(
-      {required String startKey, required String endKey}) {
-    assert(box.isOpen);
-    // TODO merge transaction data
-    return keysBetween(startKey: startKey, endKey: endKey)
-        .map((k) => box.get(k));
-  }
-
-  Iterable<String> keysBetween(
-      {required String startKey, required String endKey}) sync* {
-    assert(box.isOpen);
-    // TODO merge transaction data
-    for (var k in box.keys) {
-      if (box.get(k) == null) return;
-      if (Comparable.compare(k, startKey) < 0) continue;
-      if (Comparable.compare(k, endKey) > 0) return;
-      yield k as String;
-    }
-  }
-
-  bool containsKey(String key) {
-    assert(box.isOpen);
-    return box.containsKey(key);
-  }
-
-  void beginTransaction() {
-    assert(box.isOpen);
-    assert(!isInsideTransaction,
-        'runInTransaction called when an existing transaction is already in progress.');
-    _transaction = {};
-  }
-
-  Future<void> endTransaction() async {
-    assert(box.isOpen);
-    assert(isInsideTransaction);
-    var v = _transaction!;
-    _transaction = null;
-
-    _transactionFuture = Future.wait([
-      if (_transactionFuture != null) _transactionFuture!,
-      box.putAll(v),
-      box.deleteAll(v.keys.where((k) => v[k] == null))
-    ]);
-
-    await _transactionFuture;
-  }
-
-  Future<void>? _transactionFuture;
-
-  Future<void> close() async {
-    assert(box.isOpen);
-    await _transactionFuture;
-    await box.close();
-  }
-
-  void delete(String key) {
-    _verifyInsideTransaction();
-    _transaction![key] = null;
-  }
-
-  void deleteAll(Iterable<String> keys) {
-    _verifyInsideTransaction();
-    for (var k in keys) {
-      _transaction![k] = null;
-    }
-  }
-
-  void put(String key, dynamic value) {
-    _verifyInsideTransaction();
-    _transaction![key] = value;
-  }
-
-  void _verifyInsideTransaction() {
-    assert(box.isOpen);
-    assert(
-        isInsideTransaction, 'Transaction expected to already be in progress.');
   }
 }
 

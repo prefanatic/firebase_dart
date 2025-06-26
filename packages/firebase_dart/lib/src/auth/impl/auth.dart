@@ -13,6 +13,7 @@ import 'package:http/http.dart';
 import 'package:meta/meta.dart';
 import 'package:openid_client/openid_client.dart' as openid;
 import 'package:rxdart/rxdart.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
 import '../multi_factor.dart';
@@ -210,8 +211,11 @@ class FirebaseAuthImpl extends FirebaseService with FirebaseAuthMixin {
           'handleCodeInApp true when sending sign in link to email.');
     }
 
-    var box = await userStorageManager.storage;
-    await box.put('emailForSignIn', email);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'firebase_auth_emailForSignIn_${userStorageManager.appId}',
+      email,
+    );
 
     await rpcHandler.sendSignInLinkToEmail(
         email: email, actionCodeSettings: actionCodeSettings);
@@ -224,8 +228,11 @@ class FirebaseAuthImpl extends FirebaseService with FirebaseAuthMixin {
     if (!isSignInWithEmailLink(url.toString())) {
       return null;
     }
+    final prefs = await SharedPreferences.getInstance();
     var email = url.queryParameters['email'] ??
-        (await userStorageManager.storage).get('emailForSignIn');
+        prefs.getString(
+          'firebase_auth_emailForSignIn_${userStorageManager.appId}',
+        );
     if (email == null && askUserForEmail != null) {
       email = await askUserForEmail();
     }

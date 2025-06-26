@@ -4,9 +4,9 @@ import 'dart:math';
 import 'package:firebase_dart/implementation/pure_dart.dart';
 import 'package:firebase_dart/src/auth/app_verifier.dart';
 import 'package:firebase_dart/src/core.dart';
-import 'package:firebase_dart/src/core/impl/persistence.dart';
 import 'package:firebase_dart/src/implementation/isolate/auth.dart';
 import 'package:meta/meta.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../auth.dart';
@@ -26,26 +26,36 @@ class FirebaseAppAuthCredential extends AuthCredential {
 
 abstract class FirebaseAppAuthHandler implements AuthHandler {
   const FirebaseAppAuthHandler();
-  Future<FirebaseAppAuthCredential> createCredential(
-      {String? eventId,
-      String? sessionId,
-      String? providerId,
-      String? link}) async {
-    var box = await PersistenceStorage.openBox('firebase_auth');
-    sessionId = sessionId ?? box.get('redirect_session_id');
+
+  Future<FirebaseAppAuthCredential> createCredential({
+    String? eventId,
+    String? sessionId,
+    String? providerId,
+    String? link,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Get sessionId
+    sessionId =
+        sessionId ?? prefs.getString('firebase_auth_redirect_session_id')!;
 
     if (eventId != null) {
-      var storedEventId = box.get('redirect_event_id');
+      // Get stored event ID
+      var storedEventId = prefs.getString('firebase_auth_redirect_event_id');
+
       if (storedEventId != eventId) {
         throw FirebaseAuthException.noAuthEvent();
       }
-      await box.delete('redirect_event_id');
+
+      // Delete the stored event ID
+      await prefs.remove('firebase_auth_redirect_event_id');
     }
 
     return FirebaseAppAuthCredential(
-        providerId: providerId ?? 'unknown',
-        sessionId: sessionId!,
-        link: link!);
+      providerId: providerId ?? 'unknown',
+      sessionId: sessionId,
+      link: link!,
+    );
   }
 
   static String _randomString([int length = 32]) {
@@ -66,9 +76,7 @@ abstract class FirebaseAppAuthHandler implements AuthHandler {
     Map<dynamic, dynamic>? parameters,
   }) {
     var eventId = Uuid().v4();
-
     var sessionId = _randomString();
-
     var platform = Platform.current;
 
     var url = Uri(
@@ -133,9 +141,15 @@ abstract class FirebaseAppAuthHandler implements AuthHandler {
       scopes: provider.scopes,
     );
 
-    var box = await PersistenceStorage.openBox('firebase_auth');
-    await box.put('redirect_session_id', url.queryParameters['sessionId']);
-    await box.put('redirect_event_id', url.queryParameters['eventId']);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'firebase_auth_redirect_session_id',
+      url.queryParameters['sessionId']!,
+    );
+    await prefs.setString(
+      'firebase_auth_redirect_event_id',
+      url.queryParameters['eventId']!,
+    );
 
     var installation = FirebaseImplementation.installation;
     var launchUrl = (installation as BaseFirebaseImplementation).launchUrl;

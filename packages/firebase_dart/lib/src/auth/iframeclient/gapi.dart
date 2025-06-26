@@ -1,18 +1,33 @@
 @JS('gapi')
 library gapi;
 
-import 'package:js/js.dart';
+import 'dart:js_interop';
 
 @JS()
 external void load(String libraries, LoadConfig config);
 
 @JS()
 @anonymous
-abstract class LoadConfig {
-  external factory LoadConfig(
-      {Function callback, Function onerror, num timeout, Function ontimeout});
-  external Function get callback;
-  external Function get onerror;
-  external num get timeout;
-  external Function get ontimeout;
+@staticInterop
+class LoadConfig {
+  external factory LoadConfig({
+    JSFunction? callback,
+    JSFunction? onerror,
+    num? timeout,
+    JSFunction? ontimeout,
+  });
+}
+
+extension LoadConfigExtension on LoadConfig {
+  external JSFunction? get callback;
+  external set callback(JSFunction? value);
+
+  external JSFunction? get onerror;
+  external set onerror(JSFunction? value);
+
+  external num? get timeout;
+  external set timeout(num? value);
+
+  external JSFunction? get ontimeout;
+  external set ontimeout(JSFunction? value);
 }

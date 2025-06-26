@@ -16,7 +16,7 @@ import 'package:platform_info/platform_info.dart' as platform_info;
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 class GoogleAuthHandler extends DirectAuthHandler {
-  GoogleAuthHandler() : super(GoogleAuthProvider.PROVIDER_ID);
+  GoogleAuthHandler() : super(GoogleAuthProvider.id);
 
   @override
   Future<void> signOut(FirebaseApp app, User user) async {
