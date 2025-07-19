@@ -9,7 +9,6 @@ import 'package:firebase_dart/implementation/pure_dart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_apns_only/flutter_apns_only.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:logging/logging.dart';
 import 'package:platform_info/platform_info.dart' as platform_info;
@@ -143,46 +142,7 @@ class FlutterApplicationVerifier extends BaseApplicationVerifier {
 
   @override
   Future<String?> verifyWithApns(FirebaseAuth auth) async {
-    try {
-      var apns = ApnsPushConnectorOnly();
-
-      var completer = Completer<String>();
-      apns.configureApns(
-        onMessage: (message) async {
-          var v =
-              json.decode(message.payload['data']['com.google.firebase.auth']);
-
-          completer.complete('${v['receipt']}:${v['secret']}');
-        },
-      );
-
-      var tokenCompleter = Completer<String>();
-      if (apns.token.value != null) {
-        tokenCompleter.complete(apns.token.value);
-      } else {
-        apns.token.addListener(() async {
-          if (tokenCompleter.isCompleted) return;
-          tokenCompleter.complete(apns.token.value);
-        });
-      }
-
-      var defaultTimeout = const Duration(seconds: 5);
-      var s = await apns.getAuthorizationStatus().timeout(defaultTimeout);
-      if (s != ApnsAuthorizationStatus.authorized) {
-        if (!await apns.requestNotificationPermissions()) {
-          return null;
-        }
-      }
-
-      var timeout = await verifyIosClient(auth,
-              appToken: await tokenCompleter.future.timeout(defaultTimeout),
-              isSandbox: !kReleaseMode)
-          .timeout(defaultTimeout);
-
-      return completer.future.timeout(timeout);
-    } catch (e) {
-      return null;
-    }
+    return null;
   }
 
   @override
